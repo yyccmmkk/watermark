@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<script>
+    {
+
+        class Watermark {
+            constructor(opt) {
+                let style = {...this.defaults.style,...opt.style};
+                let canvasStyle = {...this.defaults.canvasStyle,...opt.canvasStyle};
+                this.options = Object.assign({}, this.defaults, opt,{style,canvasStyle});
+            }
+
+            defaults = {
+                text: '这里是水印',
+                positionType: 'fixed',
+                parentSelector: 'body',
+                canvasClassName: 'watermark',
+                gapsX: 20,
+                gapsY: 20,
+                rotate: 45,
+                debounceTime: 300,// ms
+                style: {
+                    font: '16px 微软雅黑',
+                    fillStyle: '#ddd',
+                    textBaseline: 'middle'
+                },
+                canvasStyle: {
+                    left: 0,
+                    top: 0,
+                    zIndex: 999,
+                    pointerEvents: 'none',
+                    display: 'block'
+                },
+                created(canvas) {
+                    console.log(canvas, 'canvas created');
+                },
+                complete(ctx, context) {
+                    console.log(ctx, context, 'draw completed')
+                }
+            };
+
+
+            initEle() {
+                const {parentSelector, canvasClassName, positionType, canvasStyle, rotate, created} = this.options;
+                let canvas = document.createElement('canvas');
+                let parent = document.querySelector(parentSelector);
+                this.parent = parent;
+                canvas.class = canvasClassName;
+                canvas.style.position = positionType;
+                Object.assign(canvas.style, canvasStyle);
+                let max = Math.max(parent.clientWidth, (+parent.clientHeight || window.innerHeight));
+                canvas.width = max;
+                canvas.height = max;
+                created.apply(this, [canvas]);
+                this.canvas = canvas;
+                parent.appendChild(canvas);
+                this.ctx = canvas.getContext('2d');
+                this.ctx.rotate(rotate * Math.PI / 180);
+                canvas.getContext = () => undefined;
+                return canvas
+            }
+
+            init() {
+                const {text} = this.options;
+                this.createWatermark(text);
+                this.watch(() => {
+                    this.createWatermark(text);
+                })
+            }
+
+            createWatermark(text) {
+                this.initEle();
+                this.draw(text);
+            }
+
+            setCanvasSize() {
+                const {parent} = this;
+                let max = Math.max(parent.clientWidth, (+parent.clientHeight || window.innerHeight));
+                this.canvas.width = max;
+                this.canvas.height = max;
+                this.ctx.rotate(this.options.rotate * Math.PI / 180);
+                window.wm = this;
+
+            }
+
+            clearCanvas() {
+                const canvas = this.canvas;
+                const {rotate} = this.options;
+                this.ctx.rotate(-rotate * Math.PI / 180)
+                this.ctx.clearRect(0, 0, canvas.width, canvas.height);
+                this.ctx.rotate(rotate * Math.PI / 180)
+
+            }
+
+            draw(text) {
+                const ctx = this.ctx;
+                const canvas = this.canvas;
+                const {gapsX, gapsY, rotate} = this.options;
+                this.options.text = text;
+                this.clearCanvas();
+                Object.assign(ctx, this.options.style);
+                let temp = ctx.measureText(text);
+                let textWidth = temp.width + gapsX;
+                let textHeight = gapsY + 14 * 1.5;
+                let maxWidth = 3 * canvas.width;
+                let xCount = Math.ceil(maxWidth / textWidth);
+                let yCount = Math.ceil(maxWidth / textHeight);
+
+
+                for (let x = 0, len = xCount; x < len; x++) {
+                    for (let y = 0, lenY = yCount; y < lenY; y++) {
+                        let startOffset = y & 1 ? 0 : textWidth / 5;
+                        ctx.fillText(text, textWidth * x + startOffset - canvas.height * (Math.ceil(rotate / (rotate > 180 ? 180 : 90)) || 1), textHeight * y - canvas.height * rotate / (rotate > 180 ? 360 : 45));
+                    }
+                }
+
+            }
+
+            watch(userCallBack) {
+                const {positionType, parentSelector: selector, canvasClassName, canvasStyle} = this.options;
+
+                // 选择需要观察变动的节点
+                const targetNode = document.querySelector(selector);
+
+                // 观察器的配置（需要观察什么变动）
+                const config = {attributes: true, childList: true, subtree: true};
+
+                // 当观察到变动时执行的回调函数
+                const callback = function (mutationsList, observer) {
+                    // Use traditional 'for loops' for IE 11
+                    for (let mutation of mutationsList) {
+                        if (mutation.type === 'childList') {
+                            let len = mutation.removedNodes.length;
+                            if (len) {
+                                for (let i = 0; i < len; i++) {
+                                    if (mutation.removedNodes[i].class === canvasClassName) {
+                                        //watermark(text,rotate);
+                                        userCallBack()
+                                    }
+                                }
+                            }
+                        } else if (mutation.type === 'attributes') {
+                            if (mutation.target.class === canvasClassName && mutation.attributeName === 'style') {
+                                mutation.target.style.display = 'block';
+                                Object.assign(mutation.target.style, canvasStyle);
+                                mutation.target.style.position = positionType;
+                            }
+                        }
+                    }
+                };
+
+                // 创建一个观察器实例并传入回调函数
+                const observer = new MutationObserver(callback);
+
+                // 以上述配置开始观察目标节点
+                observer.observe(targetNode, config);
+
+                // 之后，可停止观察
+                //observer.disconnect();
+                this.observer = observer;
+
+                window.addEventListener('resize', () => this.handleResize(), false)
+                return observer
+            }
+
+            handleResize() {
+                const {debounceTime, text} = this.options;
+                this._h && clearTimeout(this._h);
+                this._h = setTimeout(() => {
+                    this.setCanvasSize();
+                    this.draw(text)
+                }, debounceTime)
+            }
+
+            destroy() {
+                const {observer, canvas,} = this;
+                observer.disconnect();
+                canvas.parentNode && canvas.parentNode.removeChild(canvas);
+                window.removeEventListener('resize', () => this.handleResize())
+            }
+
+        }
+
+        let instance = new Watermark({
+            // gapsX: 80,
+            // gapsY: 80,
+            style: {
+                fillStyle:"#00ffaa"
+            },
+            created(canvas) {
+                console.log('custom canvas created');
+            }
+        })
+        instance.init();
+
+    }
+</script>
+</body>
+</html>
